@@ -1,0 +1,14 @@
+{
+  "name": "wordbubblesolver",
+  "version": "0.0.1",
+  "description": "Find words within a grid of letters.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Kevin Lee",
+  "license": "ISC",
+  "dependencies": {
+    "word-list": "^1.0.1"
+  }
+}
