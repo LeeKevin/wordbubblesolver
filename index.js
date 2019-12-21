@@ -1,37 +1,107 @@
-var fs = require('fs'),
-    util = require('util'),
-    wordList = fs.readFileSync(require('word-list'), 'utf-8');
+const fs = require('fs');
+const wordList = fs.readFileSync(require('word-list'), 'utf-8');
 
-function isWord(word, exact) {
-    if (typeof exact == 'undefined') exact = false;
-    var re = new RegExp('(?:^|\\n)(' + word + (exact ? '' : '[a-z]*') + ')(?:\\n|$)', 'gi');
-    return re.test(wordList)
-}
-
-function uniqueArray(a) {
-    var seen = {};
-    return a.filter(function (item) {
-        return seen.hasOwnProperty(item) ? false : (seen[item] = true);
-    });
-}
-
-const defaults = {
-    verbose: false,
-    numLetters: 0,
-};
-
-function wordBubbleSolver(letterGrid, options) {
-    var numLetters, wordPaths = [];
-
-    if (typeof options === 'object' && options.hasOwnProperty('numLetters')) {
-        numLetters = parseInt(options.numLetters);
-    } else {
-        numLetters = parseInt(options);
+const { isWord } = (function setup() {
+    function Trie() {
+        this.head = {
+            key: '',
+            children: {},
+        }
     }
-    if (isNaN(numLetters)) numLetters = 0;
 
-    options = util._extend(util._extend({}, defaults), typeof options === 'object' ? options : {});
+    Trie.prototype.add = function (key) {
+        var curNode = this.head
+            , newNode = null
+            , curChar = key.slice(0, 1);
 
+        key = key.slice(1);
+
+        while (
+            typeof curNode.children[curChar] !== "undefined"
+            && curChar.length > 0
+            ) {
+            curNode = curNode.children[curChar];
+            curChar = key.slice(0, 1);
+            key = key.slice(1);
+        }
+
+        while (curChar.length > 0) {
+            newNode = {
+                key: curChar
+                , value: key.length === 0 ? null : undefined
+                , children: {}
+            };
+
+            curNode.children[curChar] = newNode;
+
+            curNode = newNode;
+
+            curChar = key.slice(0, 1);
+            key = key.slice(1);
+        }
+
+        if (curNode) {
+            curNode.isWord = true;
+        }
+    };
+
+    Trie.prototype.search = function (key) {
+        var curNode = this.head
+            , curChar = key.slice(0, 1)
+            , d = 0;
+
+        key = key.slice(1);
+
+        while (typeof curNode.children[curChar] !== "undefined" && curChar.length > 0) {
+            curNode = curNode.children[curChar];
+            curChar = key.slice(0, 1);
+            key = key.slice(1);
+            d += 1;
+        }
+
+        if (curNode.value == null && key.length === 0) {
+            return {
+                depth: d,
+                isWord: curNode.isWord,
+            };
+        } else {
+            return null;
+        }
+    }
+
+    String.prototype.replaceAt = function (index, replacement) {
+        return this.substr(0, index) + replacement + this.substr(index + replacement.length);
+    }
+
+    Object.prototype.values = function () {
+        return Object.keys(this).map(k => this[k])
+    }
+
+    Array.prototype.some = function (callback) {
+        for (let i = 0; i < this.length; i++) {
+            if (callback(this[i], i)) return true;
+        }
+
+        return false;
+    }
+
+    const trie = new Trie();
+    wordList.split('\n').forEach(word => trie.add(word))
+
+    function isWord(word, exact) {
+        if (typeof exact == 'undefined') exact = false
+        const result = trie.search(word)
+
+        if (exact && result && !result.isWord) return false
+        return !!result
+    }
+
+    return {
+        isWord
+    }
+})()
+
+function wordBubbleSolver(letterGrid, ...numLetters) {
     if (Object.prototype.toString.call(letterGrid) !== '[object Array]') {
         if (typeof letterGrid !== 'string') {
             throw Error('Please provide a valid grid of letters.');
@@ -42,69 +112,99 @@ function wordBubbleSolver(letterGrid, options) {
         throw Error('Please provide a valid grid of letters.');
     }
 
-    var words = [];
+    const wordSets = []
 
-    function findWords(word, letterChain, nextPos) {
-        letterChain = letterChain.slice();
-
-        // Check that nextPos is valid
-        if (nextPos[0] < 0 || nextPos[0] >= letterGrid.length || nextPos[1] < 0) return;
-        if (nextPos[1] >= letterGrid[nextPos[0]]) return;
-        var letter = letterGrid[nextPos[0]][nextPos[1]];
-
+    function findWords([r, c], grid, word, remainingNums, words) {
+        const letter = grid[r][c];
         // Check that letter is alphanumeric
         if (!/^[a-z0-9]$/gi.test(letter)) return;
 
-        // Check that next position is not already in letterChain
-        for (var i = 0, length = letterChain.length; i < length; i++) {
-            if (nextPos[0] == letterChain[i][0] && nextPos[1] == letterChain[i][1]) return;
-        }
+        grid = grid.slice()
+        words = words.slice()
+        remainingNums = remainingNums.slice()
 
-        // Append letter to word
-        word = word + letterGrid[nextPos[0]][nextPos[1]];
+        // remove letter from grid
+        grid[r] = grid[r].replaceAt(c, ' ')
+
+        const newWord = word + letter;
+        const hasPrefix = isWord(newWord)
+        if (!hasPrefix) return
 
         // If word is desired length
-        if (numLetters && word.length == numLetters) {
-            // Check if actual word
-            if (!isWord(word, true)) return;
-            if (options.verbose) wordPaths.push(letterChain);
-            return words.push(word);
-        } else if (!numLetters && isWord(word, true)) {
-            words.push(word);
-            if (options.verbose) wordPaths.push(letterChain);
+        const numLengthIndex = remainingNums.findIndex(num => num === newWord.length)
+
+        if (numLengthIndex !== -1) {
+            if (isWord(newWord, true)) {
+                words.push(newWord)
+                remainingNums.splice(numLengthIndex, 1);
+
+                if (!remainingNums.length) {
+                    wordSets.push(words)
+                    return
+                }
+
+                // Move on to other letters
+                findWordSet(
+                    grid,
+                    remainingNums,
+                    words
+                )
+
+                return
+            }
         }
 
-        // Check if word potential
-        if (!isWord(word, false)) return;
+        if (!remainingNums.some((num) => num > newWord.length)) {
+            return
+        }
 
-        // Add letter coordinates to chain
-        letterChain.push(nextPos);
+        // Get next positions
+        for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue; // Skip current letter
 
-        // Recursive for surrounding letters
-        for (i = -1; i <= 1; i++) {
-            for (var j = -1; j <= 1; j++) {
-                if (i == 0 && j == 0) continue; // Skip current letter
-                findWords(word, letterChain, [nextPos[0] + i, nextPos[1] + j]);
+                const nextRow = r + i
+                const nextCol = c + j
+                if (nextRow < 0 || nextRow >= letterGrid.length) continue;
+                if (nextCol < 0 || nextCol >= letterGrid[nextRow].length) continue;
+                findWords(
+                    [nextRow, nextCol],
+                    grid,
+                    newWord,
+                    remainingNums,
+                    words
+                )
             }
         }
     }
 
-    // Initiate findWords for each letter
-    for (var i = 0; i < letterGrid.length; i++) {
-        for (var j = 0; j < letterGrid[i].length; j++) {
-            findWords('', [], [i, j]);
-        }
+    function findWordSet(grid, remainingNums, words) {
+        // Initiate findWords for each letter
+        grid.forEach((row, i) => {
+            Array.from(row).forEach((letter, j) => {
+                findWords(
+                    [i, j],
+                    grid,
+                    '',
+                    remainingNums,
+                    words
+                )
+            })
+        })
     }
 
-    if (options.verbose) {
-        var wordsVerbose = [];
-        for (var z = 0, wordsLength = words.length; z < wordsLength; z++) {
-            wordsVerbose.push([words[z], wordPaths[z]]);
-        }
-        return wordsVerbose;
-    } else {
-        return uniqueArray(words);
-    }
+    findWordSet(
+        letterGrid,
+        numLetters.map(num => parseInt(num)),
+        []
+    )
+
+    return Array.from(Object(
+        wordSets.map(set => set.sort()).reduce((sets, set) => ({
+            ...sets,
+            [String(set)]: set,
+        }), {})
+    ).values()).sort();
 }
 
 module.exports = wordBubbleSolver;
@@ -113,6 +213,6 @@ if (require.main === module) {
     if (process.argv.length < 3) {
         throw Error('Please provide valid arguments.');
     }
-    console.log(wordBubbleSolver(process.argv[2], process.argv[3]));
+    console.log(wordBubbleSolver(process.argv[2], ...process.argv.slice(3)));
     process.exit();
 }
