@@ -1,7 +1,10 @@
 const fs = require('fs');
 const wordList = fs.readFileSync(require('word-list'), 'utf-8');
 
-const { isWord } = (function setup() {
+const {
+    isWord,
+    getCombinations,
+} = (function setup() {
     function Trie() {
         this.head = {
             key: '',
@@ -27,9 +30,8 @@ const { isWord } = (function setup() {
 
         while (curChar.length > 0) {
             newNode = {
-                key: curChar
-                , value: key.length === 0 ? null : undefined
-                , children: {}
+                key: curChar,
+                children: {}
             };
 
             curNode.children[curChar] = newNode;
@@ -46,26 +48,27 @@ const { isWord } = (function setup() {
     };
 
     Trie.prototype.search = function (key) {
-        var curNode = this.head
-            , curChar = key.slice(0, 1)
-            , d = 0;
+        const originalSearch = key
+        let curNode = this.head
+        let curChar = key.slice(0, 1)
+        let d = 0;
 
         key = key.slice(1);
 
-        while (typeof curNode.children[curChar] !== "undefined" && curChar.length > 0) {
-            curNode = curNode.children[curChar];
-            curChar = key.slice(0, 1);
-            key = key.slice(1);
-            d += 1;
-        }
-
-        if (curNode.value == null && key.length === 0) {
-            return {
-                depth: d,
-                isWord: curNode.isWord,
-            };
-        } else {
-            return null;
+        while (true) {
+            if (typeof curNode.children[curChar] !== "undefined" && curChar.length > 0) {
+                curNode = curNode.children[curChar];
+                curChar = key.slice(0, 1);
+                key = key.slice(1);
+                d += 1;
+            } else if (curChar) {
+                return null
+            } else {
+                return {
+                    depth: d,
+                    isWord: curNode.isWord,
+                }
+            }
         }
     }
 
@@ -96,8 +99,33 @@ const { isWord } = (function setup() {
         return !!result
     }
 
+    function getCombinations(combinations, arrays, callback) {
+        if (!arrays.length) return combinations
+
+        const nextArray = arrays[0]
+        const remaining = arrays.slice(1)
+
+        if (!combinations.length) {
+            combinations = nextArray
+            return getCombinations(combinations, remaining, callback)
+        } else {
+            const nextCombinations = []
+            combinations.forEach((a) => {
+                nextArray.forEach((b) => {
+                    const validCombination = callback(a, b)
+                    if (validCombination) {
+                        nextCombinations.push(validCombination)
+                    }
+                })
+            })
+
+            return getCombinations(nextCombinations, remaining, callback)
+        }
+    }
+
     return {
-        isWord
+        isWord,
+        getCombinations,
     }
 })()
 
@@ -112,49 +140,44 @@ function wordBubbleSolver(letterGrid, ...numLetters) {
         throw Error('Please provide a valid grid of letters.');
     }
 
-    const wordSets = []
+    const validWordLengths = new Set(numLetters.map(num => parseInt(num)))
+    const maxWordLength = Math.max(Array.from(validWordLengths))
 
-    function findWords([r, c], grid, word, remainingNums, words) {
+    const wordPaths = {}
+
+    function addWord(word, path) {
+        if (!wordPaths[word.length]) {
+            wordPaths[word.length] = []
+        }
+
+        wordPaths[word.length].push([[word], new Set(path.map(position => String(position)))]);
+    }
+
+    function findWords(position, grid, word, path) {
+        const [r, c] = position
         const letter = grid[r][c];
-        // Check that letter is alphanumeric
-        if (!/^[a-z0-9]$/gi.test(letter)) return;
-
-        grid = grid.slice()
-        words = words.slice()
-        remainingNums = remainingNums.slice()
-
-        // remove letter from grid
-        grid[r] = grid[r].replaceAt(c, ' ')
+        // Check that letter is alpha
+        if (!/^[a-z]$/gi.test(letter)) return;
 
         const newWord = word + letter;
         const hasPrefix = isWord(newWord)
         if (!hasPrefix) return
 
+        grid = grid.slice()
+        path = path.slice()
+
+        // remove letter from grid
+        grid[r] = grid[r].replaceAt(c, ' ')
+        path.push(position)
+
         // If word is desired length
-        const numLengthIndex = remainingNums.findIndex(num => num === newWord.length)
-
-        if (numLengthIndex !== -1) {
+        if (validWordLengths.has(newWord.length)) {
             if (isWord(newWord, true)) {
-                words.push(newWord)
-                remainingNums.splice(numLengthIndex, 1);
-
-                if (!remainingNums.length) {
-                    wordSets.push(words)
-                    return
-                }
-
-                // Move on to other letters
-                findWordSet(
-                    grid,
-                    remainingNums,
-                    words
-                )
-
-                return
+                addWord(newWord, path)
             }
         }
 
-        if (!remainingNums.some((num) => num > newWord.length)) {
+        if (newWord.length > maxWordLength) {
             return
         }
 
@@ -171,14 +194,13 @@ function wordBubbleSolver(letterGrid, ...numLetters) {
                     [nextRow, nextCol],
                     grid,
                     newWord,
-                    remainingNums,
-                    words
+                    path
                 )
             }
         }
     }
 
-    function findWordSet(grid, remainingNums, words) {
+    function findWordSet(grid) {
         // Initiate findWords for each letter
         grid.forEach((row, i) => {
             Array.from(row).forEach((letter, j) => {
@@ -186,25 +208,29 @@ function wordBubbleSolver(letterGrid, ...numLetters) {
                     [i, j],
                     grid,
                     '',
-                    remainingNums,
-                    words
+                    []
                 )
             })
         })
+
+        // Now we have all the found words in wordPaths, find valid combinations
+        return getCombinations(
+            [],
+            numLetters.map(num => wordPaths[num] || []),
+            ([wordSetA, positionsA], [wordSetB, positionsB]) => {
+                if (Array.from(positionsB).some(pos => positionsA.has(pos))) {
+                    // overlap: invalid combination
+                    return null
+                }
+
+                return [wordSetA.concat(wordSetB), new Set([...positionsA, ...positionsB])]
+            }
+        )
     }
 
-    findWordSet(
-        letterGrid,
-        numLetters.map(num => parseInt(num)),
-        []
-    )
+    const wordSets = findWordSet(letterGrid)
 
-    return Array.from(Object(
-        wordSets.map(set => set.sort()).reduce((sets, set) => ({
-            ...sets,
-            [String(set)]: set,
-        }), {})
-    ).values()).sort();
+    return wordSets.map(([words, positions]) => words);
 }
 
 module.exports = wordBubbleSolver;
