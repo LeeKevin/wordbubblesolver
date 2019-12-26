@@ -228,9 +228,14 @@ function wordBubbleSolver(letterGrid, ...numLetters) {
         )
     }
 
-    const wordSets = findWordSet(letterGrid)
+    const wordSets = findWordSet(letterGrid).map(([words, positions]) => words);
 
-    return wordSets.map(([words, positions]) => words);
+    return Array.from(Object(
+        wordSets.reduce((sets, set) => ({
+            ...sets,
+            [String([...set].sort())]: set,
+        }), {})
+    ).values()).sort();
 }
 
 module.exports = wordBubbleSolver;
